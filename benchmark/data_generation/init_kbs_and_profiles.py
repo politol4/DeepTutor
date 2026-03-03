@@ -390,7 +390,7 @@ async def _run_jobs_with_gpu_pipeline(
             "wait_task": wait_task,
         }
 
-    while waiting_jobs or running:
+    while waiting_jobs or running or post_tasks:
         while waiting_jobs and available_gpus:
             pdf_path, kb_name = waiting_jobs.pop(0)
             gpu_id = available_gpus.pop(0)
