@@ -105,13 +105,13 @@ def _build_gap_pacing_text(task: dict, gaps: list[dict]) -> str:
         "",
         "- Start the conversation with whatever feels most relevant to your question.",
         "- Only bring up a confusion when it genuinely connects to what you and the tutor are discussing.",
-        "- If the tutor's explanation touches on one of your misconceptions, react naturally — "
-        "express surprise, push back, or ask a follow-up.",
-        "- If a confusion has NOT come up in the conversation topic, do NOT force it in.",
-        "- You may never expose all gaps in a single session — that is fine and realistic.",
+        "- If the tutor's explanation touches on one of your misconceptions, react naturally — ",
+        "  express surprise, push back, or ask a follow-up.",
+        "- You do NOT need to hold back confusions. If something comes up that you're confused about, bring it up.",
+        "- There is no limit on how many confusions you can surface across the session.",
         "",
-        "Key constraint: only one confusion per reply. "
-        "Never dump multiple issues at once.",
+        "Per-reply guideline: prefer focusing on one confusion at a time for clarity, "
+        "but if two issues are genuinely entangled you may mention both.",
     ]
     return "\n".join(lines)
 

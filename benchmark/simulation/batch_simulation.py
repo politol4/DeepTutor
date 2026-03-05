@@ -29,6 +29,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
+# Locks for entry generation to avoid race conditions between backends for the same profile
+_entry_gen_locks: dict[str, asyncio.Lock] = {}
+
 _THIS_FILE = Path(__file__).resolve()
 PROJECT_ROOT = _THIS_FILE.parents[2]
 if str(PROJECT_ROOT) not in sys.path:
@@ -396,50 +399,47 @@ def _extract_eval_summary(eval_result: dict) -> dict:
 
 
 # ======================================================================
-# Orchestration: one KB at a time
+# Orchestration: one (profile, backend) pair at a time
 # ======================================================================
 
 
-async def _process_one_kb(
-    kb_data: dict,
+async def _process_one_profile_backend(
+    kb_name: str,
+    profile: dict,
+    scope: dict,
     cfg: dict,
     kb_base_dir: str,
+    backend: str,
     output_dir: Path,
     semaphore: asyncio.Semaphore,
     max_turns: int,
     language: str,
-    backends: list[str],
     evolve_profile: bool,
     eval_temperature: float,
     skip_eval: bool,
     verbose: bool,
 ) -> dict:
-    """Process all profiles for one KB: generate entries → simulate → evaluate."""
+    """Process one (profile, backend) pair: generate entries → simulate → evaluate."""
     async with semaphore:
-        kb_name = kb_data["kb_name"]
-        scope = kb_data["knowledge_scope"]
-        profiles = kb_data["profiles"]
+        profile_id = profile.get("profile_id", "unknown")
+        profile_result: dict[str, Any] = {
+            "profile_id": profile_id,
+            "kb_name": kb_name,
+            "backend": backend,
+            "num_entries": 0,
+            "simulation": {},
+            "evaluation": {},
+        }
 
-        logger.info("=" * 50)
-        logger.info("KB: %s (%d profiles)", kb_name, len(profiles))
-        logger.info("=" * 50)
+        # ----------------------------------------------------------
+        # Step 1: Generate entries (shared across backends — lock to avoid race)
+        # ----------------------------------------------------------
+        entries_dir = output_dir / "entries" / kb_name / profile_id
+        lock_key = f"{kb_name}/{profile_id}"
+        if lock_key not in _entry_gen_locks:
+            _entry_gen_locks[lock_key] = asyncio.Lock()
 
-        kb_results: list[dict] = []
-
-        for profile in profiles:
-            profile_id = profile.get("profile_id", "unknown")
-            profile_result: dict[str, Any] = {
-                "profile_id": profile_id,
-                "kb_name": kb_name,
-                "num_entries": 0,
-                "simulations": {},
-                "evaluations": {},
-            }
-
-            # ----------------------------------------------------------
-            # Step 1: Generate entries
-            # ----------------------------------------------------------
-            entries_dir = output_dir / "entries" / kb_name / profile_id
+        async with _entry_gen_locks[lock_key]:
             if (entries_dir / "_all_entries.jsonl").exists():
                 logger.info("SKIP entry generation (exists): %s", profile_id)
                 entries = _load_entries(entries_dir)
@@ -457,97 +457,119 @@ async def _process_one_kb(
                     logger.error(
                         "Entry generation failed for %s: %s", profile_id, e
                     )
-                    kb_results.append(profile_result)
-                    continue
+                    return profile_result
 
-            if not entries:
-                logger.warning("No entries for %s, skipping simulation", profile_id)
-                kb_results.append(profile_result)
-                continue
+        if not entries:
+            logger.warning("No entries for %s, skipping simulation", profile_id)
+            return profile_result
 
-            profile_result["num_entries"] = len(entries)
+        profile_result["num_entries"] = len(entries)
 
-            # ----------------------------------------------------------
-            # Step 2 & 3: Simulate + Evaluate with each backend
-            # ----------------------------------------------------------
-            for backend in backends:
-                transcript_path = (
-                    output_dir / "transcripts" / backend / f"{profile_id}.json"
+        # ----------------------------------------------------------
+        # Step 2: Simulate
+        # ----------------------------------------------------------
+        transcript_path = (
+            output_dir / "transcripts" / backend / f"{profile_id}.json"
+        )
+
+        if transcript_path.exists():
+            logger.info(
+                "SKIP simulation (exists): %s / %s", profile_id, backend
+            )
+            sim_result = json.loads(transcript_path.read_text("utf-8"))
+        else:
+            try:
+                sim_result = await _simulate_profile(
+                    profile_id=profile_id,
+                    entries=entries,
+                    backend=backend,
+                    output_dir=output_dir,
+                    max_turns=max_turns,
+                    language=language,
+                    evolve_profile=evolve_profile,
+                    verbose=verbose,
                 )
+            except Exception as e:
+                logger.error(
+                    "Simulation failed for %s / %s: %s",
+                    profile_id,
+                    backend,
+                    e,
+                )
+                sim_result = {"error": str(e)}
 
-                # ---- Simulation ----
-                if transcript_path.exists():
-                    logger.info(
-                        "SKIP simulation (exists): %s / %s", profile_id, backend
+        profile_result["simulation"] = {
+            "num_sessions": sim_result.get("num_sessions", 0),
+            "practice_eval_profile": sim_result.get("practice_eval_profile"),
+            "transcript_path": str(transcript_path),
+        }
+
+        # ----------------------------------------------------------
+        # Step 3: Evaluate
+        # ----------------------------------------------------------
+        if (
+            not skip_eval
+            and transcript_path.exists()
+            and "error" not in sim_result
+        ):
+            eval_dir = output_dir / "evaluations" / backend
+            eval_path = eval_dir / f"{profile_id}_eval.json"
+            if eval_path.exists():
+                logger.info(
+                    "SKIP evaluation (exists): %s / %s", profile_id, backend
+                )
+                eval_result = json.loads(eval_path.read_text("utf-8"))
+            else:
+                try:
+                    eval_result = await _evaluate_profile_transcript(
+                        transcript_path=transcript_path,
+                        eval_output_dir=eval_dir,
+                        temperature=eval_temperature,
                     )
-                    sim_result = json.loads(transcript_path.read_text("utf-8"))
-                else:
-                    try:
-                        sim_result = await _simulate_profile(
-                            profile_id=profile_id,
-                            entries=entries,
-                            backend=backend,
-                            output_dir=output_dir,
-                            max_turns=max_turns,
-                            language=language,
-                            evolve_profile=evolve_profile,
-                            verbose=verbose,
-                        )
-                    except Exception as e:
-                        logger.error(
-                            "Simulation failed for %s / %s: %s",
-                            profile_id,
-                            backend,
-                            e,
-                        )
-                        sim_result = {"error": str(e)}
-
-                profile_result["simulations"][backend] = {
-                    "num_sessions": sim_result.get("num_sessions", 0),
-                    "practice_eval_profile": sim_result.get(
-                        "practice_eval_profile"
-                    ),
-                    "transcript_path": str(transcript_path),
-                }
-
-                # ---- Evaluation ----
-                if (
-                    not skip_eval
-                    and transcript_path.exists()
-                    and "error" not in sim_result
-                ):
-                    eval_dir = output_dir / "evaluations" / backend
-                    eval_path = eval_dir / f"{profile_id}_eval.json"
-                    if eval_path.exists():
-                        logger.info(
-                            "SKIP evaluation (exists): %s / %s",
-                            profile_id,
-                            backend,
-                        )
-                        eval_result = json.loads(eval_path.read_text("utf-8"))
-                    else:
-                        try:
-                            eval_result = await _evaluate_profile_transcript(
-                                transcript_path=transcript_path,
-                                eval_output_dir=eval_dir,
-                                temperature=eval_temperature,
-                            )
-                        except Exception as e:
-                            logger.error(
-                                "Evaluation failed for %s / %s: %s",
-                                profile_id,
-                                backend,
-                                e,
-                            )
-                            eval_result = {"error": str(e)}
-
-                    profile_result["evaluations"][backend] = _extract_eval_summary(
-                        eval_result
+                except Exception as e:
+                    logger.error(
+                        "Evaluation failed for %s / %s: %s",
+                        profile_id,
+                        backend,
+                        e,
                     )
+                    eval_result = {"error": str(e)}
 
-            kb_results.append(profile_result)
+            profile_result["evaluation"] = _extract_eval_summary(eval_result)
 
-        return {"kb_name": kb_name, "profiles": kb_results}
+        return profile_result
+
+
+def _merge_profile_backend_results(
+    all_results: list[dict],
+    all_kb_data: list[dict],
+    backends: list[str],
+) -> list[dict]:
+    """Merge per-(profile, backend) results into per-KB structure for summary."""
+    by_kb: dict[str, dict[str, dict]] = {}
+    for r in all_results:
+        kb = r["kb_name"]
+        pid = r["profile_id"]
+        backend = r["backend"]
+        if kb not in by_kb:
+            by_kb[kb] = {}
+        if pid not in by_kb[kb]:
+            by_kb[kb][pid] = {
+                "profile_id": pid,
+                "kb_name": kb,
+                "num_entries": r.get("num_entries", 0),
+                "simulations": {},
+                "evaluations": {},
+            }
+        by_kb[kb][pid]["simulations"][backend] = r.get("simulation", {})
+        by_kb[kb][pid]["evaluations"][backend] = r.get("evaluation", {})
+
+    kb_results: list[dict] = []
+    for kb_data in all_kb_data:
+        kb_name = kb_data["kb_name"]
+        profiles = list((by_kb.get(kb_name) or {}).values())
+        kb_results.append({"kb_name": kb_name, "profiles": profiles})
+    return kb_results
 
 
 # ======================================================================
@@ -720,13 +742,13 @@ async def main() -> None:
         "--concurrency",
         type=int,
         default=6,
-        help="Max parallel KB processing (default: 6)",
+        help="Max parallel (profile, backend) tasks (default: 6)",
     )
     parser.add_argument(
         "--max-turns",
         type=int,
-        default=20,
-        help="Max student turns per session (default: 20)",
+        default=30,
+        help="Max student turns per session (default: 30)",
     )
     parser.add_argument(
         "--backends",
@@ -843,39 +865,83 @@ async def main() -> None:
     else:
         backends_for_sim = backends
 
-    # Run all KBs in parallel
     semaphore = asyncio.Semaphore(args.concurrency)
-    tasks = [
-        _process_one_kb(
-            kb_data=data,
-            cfg=cfg,
-            kb_base_dir=str(kb_base_dir),
-            output_dir=output_dir,
-            semaphore=semaphore,
-            max_turns=args.max_turns,
-            language=args.language,
-            backends=backends_for_sim,
-            evolve_profile=not args.no_evolve,
-            eval_temperature=args.eval_temperature,
-            skip_eval=args.skip_eval or args.skip_sim,
-            verbose=args.verbose,
-        )
-        for data in all_kb_data
-    ]
+
+    if not backends_for_sim:
+        # --skip-sim: only generate entries, one task per unique profile
+        async def _gen_entries_only(kb_data: dict, profile: dict) -> None:
+            async with semaphore:
+                kb_name = kb_data["kb_name"]
+                profile_id = profile.get("profile_id", "unknown")
+                entries_dir = output_dir / "entries" / kb_name / profile_id
+                if (entries_dir / "_all_entries.jsonl").exists():
+                    logger.info("SKIP entry generation (exists): %s/%s", kb_name, profile_id)
+                    return
+                try:
+                    entries = await _generate_entries_for_profile(
+                        kb_name=kb_name,
+                        profile=profile,
+                        knowledge_scope=kb_data["knowledge_scope"],
+                        cfg=cfg,
+                        kb_base_dir=str(kb_base_dir),
+                    )
+                    _save_entries(entries, entries_dir)
+                except Exception as e:
+                    logger.error("Entry generation failed for %s/%s: %s", kb_name, profile_id, e)
+
+        tasks = [
+            _gen_entries_only(data, profile)
+            for data in all_kb_data
+            for profile in data["profiles"]
+        ]
+        logger.info("Launching %d entry-generation tasks (concurrency=%d)", len(tasks), args.concurrency)
+        await asyncio.gather(*tasks, return_exceptions=True)
+        logger.info("Entry generation complete. Output: %s", output_dir)
+        return
+
+    # Build tasks: one per (profile, backend) pair for full parallelism
+    tasks = []
+    for data in all_kb_data:
+        kb_name = data["kb_name"]
+        scope = data["knowledge_scope"]
+        for profile in data["profiles"]:
+            for backend in backends_for_sim:
+                tasks.append(
+                    _process_one_profile_backend(
+                        kb_name=kb_name,
+                        profile=profile,
+                        scope=scope,
+                        cfg=cfg,
+                        kb_base_dir=str(kb_base_dir),
+                        backend=backend,
+                        output_dir=output_dir,
+                        semaphore=semaphore,
+                        max_turns=args.max_turns,
+                        language=args.language,
+                        evolve_profile=not args.no_evolve,
+                        eval_temperature=args.eval_temperature,
+                        skip_eval=args.skip_eval,
+                        verbose=args.verbose,
+                    )
+                )
+
+    total_tasks = len(tasks)
+    logger.info("Launching %d parallel tasks (concurrency=%d)", total_tasks, args.concurrency)
     all_results = await asyncio.gather(*tasks, return_exceptions=True)
 
     # Collect results (filter out exceptions)
-    kb_results: list[dict] = []
+    good_results: list[dict] = []
     for i, result in enumerate(all_results):
         if isinstance(result, Exception):
-            logger.error(
-                "KB %s failed entirely: %s", all_kb_data[i]["kb_name"], result
-            )
+            logger.error("Task %d failed: %s", i, result)
         else:
-            kb_results.append(result)
+            good_results.append(result)
+
+    # Merge per-(profile, backend) results into per-KB structure
+    kb_results = _merge_profile_backend_results(good_results, all_kb_data, backends_for_sim)
 
     # Summary
-    _build_and_print_summary(kb_results, backends_for_sim or backends, output_dir)
+    _build_and_print_summary(kb_results, backends_for_sim, output_dir)
 
 
 if __name__ == "__main__":
