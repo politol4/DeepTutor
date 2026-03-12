@@ -42,6 +42,7 @@ SUPPORTED_BACKENDS = {
     "deep_tutor_no_memory",
     "deep_tutor_no_rag_memory",
 }
+_DIALOGUE_LOG_LOCK: asyncio.Lock | None = None
 
 
 def _parse_names(raw: str) -> list[str]:
@@ -58,6 +59,47 @@ def _load_entries(entries_jsonl: Path) -> list[dict]:
     return entries
 
 
+def _load_existing_transcript(transcript_path: Path) -> dict | None:
+    if not transcript_path.exists():
+        return None
+    try:
+        with open(transcript_path, encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return data
+    except Exception as e:
+        logger.warning("Failed to read existing transcript %s: %s", transcript_path, e)
+    return None
+
+
+def _get_dialogue_log_lock() -> asyncio.Lock:
+    global _DIALOGUE_LOG_LOCK
+    if _DIALOGUE_LOG_LOCK is None:
+        _DIALOGUE_LOG_LOCK = asyncio.Lock()
+    return _DIALOGUE_LOG_LOCK
+
+
+async def _emit_dialogue_log(
+    *,
+    kb_name: str,
+    backend: str,
+    profile_id: str,
+    session_num: int,
+    session_total: int,
+    text: str,
+) -> None:
+    """Emit captured student/tutor dialogue lines with stable prefixes."""
+    prefix = f"[{kb_name}/{backend}] {profile_id} session {session_num}/{session_total}"
+    lines = [ln.rstrip() for ln in text.splitlines() if ln.strip()]
+    if not lines:
+        return
+    async with _get_dialogue_log_lock():
+        logger.info("%s dialogue begin", prefix)
+        for line in lines:
+            logger.info("%s %s", prefix, line)
+        logger.info("%s dialogue end", prefix)
+
+
 async def _simulate_profile_backend(
     *,
     kb_name: str,
@@ -69,6 +111,7 @@ async def _simulate_profile_backend(
     language: str,
     evolve_profile: bool,
     verbose: bool,
+    force: bool,
 ) -> dict:
     from benchmark.simulation.conversation import (
         _run_single_session,
@@ -87,20 +130,65 @@ async def _simulate_profile_backend(
             "error": "0 entries",
         }
 
+    transcript_path = output_root / "transcripts" / kb_name / backend / f"{profile_id}.json"
+    existing = None if force else _load_existing_transcript(transcript_path)
+    existing_sessions_by_entry: dict[str, dict] = {}
+    if existing:
+        for s in existing.get("sessions", []) or []:
+            if not isinstance(s, dict):
+                continue
+            sid = str(s.get("entry_id", "")).strip()
+            if sid:
+                existing_sessions_by_entry[sid] = s
+
     workspace = str(output_root / "workspaces" / kb_name / backend / profile_id)
     prior_sessions_summary: list[str] = []
     current_profile = entries[0].get("profile", {})
     sessions_results: list[dict] = []
+    skipped_existing = 0
+    newly_run = 0
 
     for i, base_entry in enumerate(entries):
         session_num = i + 1
         entry = dict(base_entry)
+        entry_id = str(entry.get("entry_id", f"session_{session_num}"))
 
         if evolve_profile and i > 0:
             prev_profile = entries[i - 1].get("profile", {})
             resolved = entries[i - 1].get("gaps", [])
             current_profile = evolve_profile_fn(prev_profile, resolved)
         entry["profile"] = current_profile
+
+        if entry_id in existing_sessions_by_entry:
+            prev = existing_sessions_by_entry[entry_id]
+            prev_transcript = prev.get("transcript", []) or []
+            prev_entry = prev.get("entry", entry)
+            result = {
+                "entry_id": entry_id,
+                "actual_turns": prev.get("actual_turns", 0),
+                "transcript": prev_transcript,
+                "entry": prev_entry,
+                "practice_questions": prev.get("practice_questions", []) or [],
+                "_skipped_existing": True,
+            }
+            summary = _summarize_session(
+                result.get("transcript", []),
+                result.get("entry", {}).get("task", {}),
+                session_num,
+            )
+            prior_sessions_summary.append(summary)
+            sessions_results.append(result)
+            skipped_existing += 1
+            logger.info(
+                "[%s/%s] %s session %d/%d entry_id=%s already exists, skipped",
+                kb_name,
+                backend,
+                profile_id,
+                session_num,
+                len(entries),
+                entry_id,
+            )
+            continue
 
         prior_ctx = "\n".join(prior_sessions_summary) if prior_sessions_summary else None
         logger.info(
@@ -113,7 +201,8 @@ async def _simulate_profile_backend(
         )
 
         try:
-            if verbose:
+            session_buf = io.StringIO()
+            with contextlib.redirect_stdout(session_buf):
                 result = await _run_single_session(
                     entry=entry,
                     max_turns=max_turns,
@@ -124,18 +213,15 @@ async def _simulate_profile_backend(
                     deeptutor_language=language,
                     prior_sessions_summary=prior_ctx,
                 )
-            else:
-                with contextlib.redirect_stdout(io.StringIO()):
-                    result = await _run_single_session(
-                        entry=entry,
-                        max_turns=max_turns,
-                        auto=True,
-                        use_editor=False,
-                        auto_backend=backend,
-                        deeptutor_workspace=workspace,
-                        deeptutor_language=language,
-                        prior_sessions_summary=prior_ctx,
-                    )
+            if verbose:
+                await _emit_dialogue_log(
+                    kb_name=kb_name,
+                    backend=backend,
+                    profile_id=profile_id,
+                    session_num=session_num,
+                    session_total=len(entries),
+                    text=session_buf.getvalue(),
+                )
         except Exception as e:
             logger.error(
                 "[%s/%s] %s session %d failed: %s",
@@ -157,6 +243,7 @@ async def _simulate_profile_backend(
         summary = _summarize_session(result.get("transcript", []), entry.get("task", {}), session_num)
         prior_sessions_summary.append(summary)
         sessions_results.append(result)
+        newly_run += 1
 
     combined = {
         "kb_name": kb_name,
@@ -189,6 +276,8 @@ async def _simulate_profile_backend(
         "profile_id": profile_id,
         "kb_name": kb_name,
         "num_sessions": combined.get("num_sessions", 0),
+        "num_skipped_existing": skipped_existing,
+        "num_newly_run": newly_run,
         "transcript_path": str(transcript_path),
         "error": None,
     }
@@ -207,6 +296,7 @@ async def _process_profile(
     language: str,
     evolve_profile: bool,
     verbose: bool,
+    force: bool,
 ) -> dict:
     async with semaphore:
         record = {
@@ -229,6 +319,7 @@ async def _process_profile(
                     language=language,
                     evolve_profile=evolve_profile,
                     verbose=verbose,
+                    force=force,
                 )
 
         async def _run_one_backend_tagged(backend: str):
@@ -309,11 +400,16 @@ async def main() -> None:
         help="Override LLM model for step2 simulation. If set, ignores env LLM_MODEL.",
     )
     parser.add_argument("--no-evolve", action="store_true", help="Disable profile evolution")
-    parser.add_argument("--verbose", "-v", action="store_true", help="Show per-turn output")
+    parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Show per-turn student/tutor dialogue logs",
+    )
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Accepted for compatibility; transcripts are overwritten by default.",
+        help="Force rerun all entries even if transcript already contains them.",
     )
     args = parser.parse_args()
 
@@ -352,6 +448,7 @@ async def main() -> None:
     print(f"KBs: {len(kb_names)} | Concurrency(profile): {args.concurrency}")
     print(f"Backends(parallel/profile): {backends}")
     print(f"Backend concurrency/profile: {args.backend_concurrency}")
+    print(f"Resume mode: {'disabled (--force)' if args.force else 'enabled (skip existing entries)'}")
     print(f"Output root: {output_root}")
 
     sem = asyncio.Semaphore(args.concurrency)
@@ -422,6 +519,7 @@ async def main() -> None:
                     language=args.language,
                     evolve_profile=not args.no_evolve,
                     verbose=args.verbose,
+                    force=args.force,
                     )
                 except Exception as e:
                     return {
@@ -470,7 +568,7 @@ async def main() -> None:
         "concurrency_profile": args.concurrency,
         "backend_concurrency_per_profile": max(1, args.backend_concurrency),
         "backend_execution": "parallel_per_profile",
-        "overwrite": True,
+        "overwrite": bool(args.force),
         "pre_errors": pre_errors,
         "results": profile_results,
         "num_profiles": len(profile_results),

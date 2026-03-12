@@ -14,6 +14,7 @@ import argparse
 import asyncio
 import json
 import sys
+import time
 from pathlib import Path
 
 import httpx
@@ -87,6 +88,7 @@ async def run_direct_test(prompt: str, system_prompt: str, max_tokens: int, temp
 
 
 async def main() -> None:
+    started = time.perf_counter()
     parser = argparse.ArgumentParser(description="Quick LLM API smoke test")
     parser.add_argument("--prompt", default="Briefly explain what a derivative is.")
     parser.add_argument("--system", default="You are a concise helpful assistant.")
@@ -122,6 +124,9 @@ async def main() -> None:
             await run_direct_test(args.prompt, args.system, args.max_tokens, args.temperature)
         except Exception as e:
             print(f"[DirectTest] FAILED: {type(e).__name__}: {e}")
+
+    elapsed = time.perf_counter() - started
+    print(f"[Total] elapsed={elapsed:.2f}s")
 
 
 if __name__ == "__main__":

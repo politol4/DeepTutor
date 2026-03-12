@@ -27,6 +27,23 @@ from src.services.path_service import get_path_service
 
 logger = get_logger("CodeExecutor")
 
+_MAX_CONCURRENT_SUBPROCESSES = int(os.getenv("CODE_EXEC_MAX_CONCURRENT", "3"))
+_fork_semaphore: asyncio.Semaphore | None = None
+
+
+def _get_fork_semaphore() -> asyncio.Semaphore:
+    """Lazily create a per-event-loop semaphore limiting concurrent subprocess forks.
+
+    subprocess.run uses fork() which creates a COW clone of the entire parent
+    process virtual address space.  When the parent holds several GB of RAG
+    data, many concurrent forks can push committed virtual memory to 50-80 GB
+    and trigger the OS OOM killer.
+    """
+    global _fork_semaphore
+    if _fork_semaphore is None:
+        _fork_semaphore = asyncio.Semaphore(_MAX_CONCURRENT_SUBPROCESSES)
+    return _fork_semaphore
+
 # Files managed by the executor itself (excluded from user-artifact lists)
 _META_FILES = frozenset({"code.py", "output.log", ".gitkeep"})
 
@@ -281,7 +298,10 @@ async def run_code(
         def _execute():
             return EXECUTION_ENV.run_python(code, timeout, execution_dir)
 
-        stdout, stderr, exit_code, elapsed_ms = await loop.run_in_executor(None, _execute)
+        async with _get_fork_semaphore():
+            stdout, stderr, exit_code, elapsed_ms = await loop.run_in_executor(
+                None, _execute
+            )
         status = "success"
 
     except subprocess.TimeoutExpired:
