@@ -19,10 +19,10 @@ This file describes what the current LLM system does at runtime.
 ## Scope
 
 This repository is the **paper evaluation** variant of DeepTutor, containing only:
-- Question Generation (出题)
-- Question Solving (解题)
+- Question Generation
+- Question Solving
 - RAG (Retrieval-Augmented Generation)
 - Memory / Personalization
-- Evaluation framework (benchmark + simu_tool)
+- Evaluation framework (`benchmark` + simulator tools)
 
 All features are CLI-driven. There is no web frontend or HTTP API.

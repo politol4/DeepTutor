@@ -1,11 +1,11 @@
 # Question Module (Refactored)
 
-`src/agents/question` 已重构为**双循环架构**，用于统一处理：
+`src/agents/question` has been refactored into a **dual-loop architecture** that supports:
 
-- 主题驱动出题（topic + preference）
-- 试卷驱动出题（PDF/已解析试卷）
+- topic-driven question generation (`topic + preference`)
+- exam-driven question generation (`PDF` or pre-parsed exam content)
 
-## 1. 目录结构
+## 1. Directory Structure
 
 ```text
 src/agents/question/
@@ -31,48 +31,48 @@ src/agents/question/
         └── validator.yaml
 ```
 
-## 2. 架构概览
+## 2. Architecture Overview
 
-### 路径 1：Topic 模式
+### Path 1: Topic Mode
 
-1. `IdeaAgent` 基于 topic/preference + RAG 生成候选出题创意
-2. `Evaluator` 对创意打分并给反馈，必要时继续下一轮
-3. 产出 top-k `QuestionTemplate`
-4. 对每个 template 进入生成-验证循环：
-   - `Generator` 生成 Q-A（可用 `rag_tool` / `web_search` / `write_code`）
-   - `Validator` approve/reject，不通过则反馈重生
+1. `IdeaAgent` generates candidate question ideas from the topic, preference, and RAG context
+2. `Evaluator` scores the ideas and provides feedback; additional rounds run if needed
+3. The system outputs top-k `QuestionTemplate` objects
+4. Each template enters a generation-validation loop:
+   - `Generator` produces a Q-A pair and may use `rag_tool`, `web_search`, or `write_code`
+   - `Validator` approves or rejects the result; rejected outputs are regenerated with feedback
 
-### 路径 2：Mimic 模式
+### Path 2: Mimic Mode
 
-1. PDF 先经 MinerU 解析（或直接使用已解析目录）
-2. 提取参考题（question extractor）
-3. 参考题映射为 `QuestionTemplate`
-4. 进入与 topic 模式相同的生成-验证循环
+1. A PDF is first parsed by MinerU, or a pre-parsed directory is used directly
+2. Reference questions are extracted
+3. Reference questions are mapped into `QuestionTemplate` objects
+4. The same generation-validation loop used in topic mode is applied
 
-## 3. 核心数据模型
+## 3. Core Data Models
 
-定义在 `models.py`：
+Defined in `models.py`:
 
-- `QuestionTemplate`：统一中间表示
+- `QuestionTemplate`: unified intermediate representation
   - `question_id`
   - `concentration`
   - `question_type`
   - `difficulty`
-  - `source` (`custom`/`mimic`)
-- `QAPair`：最终生成结果
+  - `source` (`custom` or `mimic`)
+- `QAPair`: final generated output
   - `question`
   - `correct_answer`
   - `explanation`
   - `validation`
 
-## 4. Coordinator 入口
+## 4. Coordinator Entry Points
 
-`AgentCoordinator` 提供两个主入口：
+`AgentCoordinator` exposes two main entry points:
 
 - `generate_from_topic(user_topic, preference, num_questions)`
 - `generate_from_exam(exam_paper_path, max_questions, paper_mode)`
 
-## 5. 配置项（main.yaml）
+## 5. Configuration (`main.yaml`)
 
 ```yaml
 question:
@@ -90,32 +90,30 @@ question:
       write_code: true
 ```
 
-## 6. 命令行交互测试
+## 6. Interactive CLI Testing
 
-新增脚本：`src/agents/question/cli.py`
-
-从项目根目录运行：
+The module includes an interactive script:
 
 ```bash
 python src/agents/question/cli.py
 ```
 
-支持：
+Supported flows:
 
-- 交互式 Topic 模式测试
-- 交互式 Mimic 模式测试（upload/parsed）
-- 输出摘要（completed/failed）与题目预览
+- Interactive topic-mode testing
+- Interactive mimic-mode testing (`upload` or `parsed`)
+- Summary output showing completed/failed items and question previews
 
-## 7. 相关工具模块
+## 7. Related Tool Modules
 
-工具位于 `src/tools/question/`：
+Tools are located under `src/tools/question/`:
 
 - `pdf_parser.py`
 - `question_extractor.py`
-- `exam_mimic.py`（薄封装，委托 coordinator）
+- `exam_mimic.py` (thin wrapper delegating to the coordinator)
 
-## 8. 注意事项
+## 8. Notes
 
-- 旧版 `retrieve_agent / generate_agent / relevance_analyzer` 已移除
-- 旧版 prompt 文件已移除
-- 旧文档中的旧接口（如 `generate_questions_custom`）不再适用
+- The legacy `retrieve_agent`, `generate_agent`, and `relevance_analyzer` have been removed
+- Legacy prompt files have been removed
+- Old interfaces from previous documentation, such as `generate_questions_custom`, are no longer applicable

@@ -1,236 +1,222 @@
 # Benchmark - Tutor Evaluation System
 
-本模块用于生成 AI 辅导系统的评测数据、运行对话模拟，并对 tutor 表现进行 LLM-as-judge 评估。
+This module generates evaluation data for the tutoring system, runs simulated conversations, and scores tutor performance with LLM-as-a-judge evaluation.
 
-## 目录结构
+## Directory Structure
 
-```
+```text
 benchmark/
 ├── config/
-│   └── benchmark_config.yaml    # 数据生成与评测配置
+│   └── benchmark_config.yaml    # Data-generation and evaluation config
 ├── data/
-│   ├── generated/               # 生成的 entries（JSONL、单文件 JSON）
-│   ├── transcripts/            # 对话 transcript 输出
-│   └── evaluations/             # 评测结果输出
-├── data_generation/             # 数据生成流水线
-├── simulation/                  # 对话模拟（StudentAgent + 人/LLM Tutor）
-├── evaluation/                 # 评测逻辑（LLM-as-judge）
-├── prompts/                     # 各阶段 LLM prompt 模板
+│   ├── generated/               # Generated entries (JSONL and per-entry JSON)
+│   ├── transcripts/             # Conversation transcripts
+│   └── evaluations/             # Evaluation outputs
+├── data_generation/             # Data-generation pipeline
+├── simulation/                  # Conversation simulation (StudentAgent + human/LLM tutor)
+├── evaluation/                  # LLM-as-judge evaluation logic
+├── prompts/                     # Prompt templates for each stage
 └── README.md
 ```
 
----
+## 1. Data Generation
 
-## 一、数据生成 (Data Generation)
+### Pipeline Overview
 
-### 流程概览
-
-```
-知识库 (KB)
+```text
+Knowledge Base
     │
-    ▼  Stage 1: 发现 KB
-    │
-    ▼  Stage 2: RAG 查询 → 生成 knowledge scope
-    │
-    ▼  Stage 3: 生成学生 profile（beginner/intermediate/advanced）
-    │
-    ▼  Stage 4-5: 对每个 profile 循环直到达标
-    │       ├── 从 content_list 随机选 10 页连续内容
-    │       ├── 生成 gaps（带 source_pages）
-    │       ├── 生成 tasks（partition + 拒绝采样）
-    │       └── 若 task 数 < min_tasks_per_profile，继续生成
-    │
-    ▼  Stage 6: 输出 entries（JSONL + 单文件 JSON）
+    ▼  Stage 1: Discover available KBs
+    ▼  Stage 2: Query RAG to build a knowledge scope
+    ▼  Stage 3: Generate student profiles (beginner / intermediate / advanced)
+    ▼  Stage 4-5: Loop per profile until quality thresholds are met
+    │       ├── Sample a contiguous page window from `content_list`
+    │       ├── Generate gaps with `source_pages`
+    │       ├── Generate tasks with partitioning and rejection sampling
+    │       └── Continue until `min_tasks_per_profile` is satisfied
+    ▼  Stage 6: Write entries to JSONL and per-entry JSON
 ```
 
-### 核心概念
+### Core Concepts
 
-- **Profile**：虚拟学生画像（背景、知识状态、性格、学习目的）
-- **Gap**：知识缺口（misconception / incomplete / missing），含 `source_pages`
-- **Task**：学习任务，对应若干 gaps，含 `initial_message`、`success_criteria`
-- **Entry**：一条评测样本 = profile + gaps + task + source_content
+- **Profile**: a synthetic student profile including background, prior knowledge, personality, and learning goals
+- **Gap**: a knowledge gap such as a misconception, incomplete understanding, or missing knowledge, with linked `source_pages`
+- **Task**: a tutoring task tied to one or more gaps, including an `initial_message` and `success_criteria`
+- **Entry**: one evaluation sample combining profile, gaps, task, and source content
 
-### 配置要点 (`benchmark_config.yaml`)
+### Important Config Keys
 
-| 配置项 | 说明 |
-|--------|------|
-| `profile_generation.profiles_per_subtopic` | 每个 KB 生成的学生数（默认 3） |
-| `gap_generation.use_content_list` | 是否用 content_list 做 page-grounded gaps |
-| `gap_generation.pages_per_profile` | 每个 profile 选取的连续页数（默认 10） |
-| `gap_generation.rejection_sampling` | 是否对 task 做批量拒绝采样 |
-| `task_generation.min_tasks_per_profile` | 每个学生至少的 task 数（默认 3） |
-| `task_generation.gaps_per_batch` | 每批生成的 gap 数 |
+| Key | Description |
+|-----|-------------|
+| `profile_generation.profiles_per_subtopic` | Number of students generated per KB/subtopic |
+| `gap_generation.use_content_list` | Whether to build page-grounded gaps from `content_list` |
+| `gap_generation.pages_per_profile` | Number of contiguous pages sampled per profile |
+| `gap_generation.rejection_sampling` | Whether task generation uses rejection sampling |
+| `task_generation.min_tasks_per_profile` | Minimum task count for each profile |
+| `task_generation.gaps_per_batch` | Number of gaps generated in each batch |
 
-### 使用方法
+### Usage
 
 ```bash
-# 生成 calc1 的评测数据
+# Generate evaluation data for calc1
 python3 -m benchmark.data_generation.pipeline --kb-names calc1
 
-# 指定配置文件
+# Use a custom config file
 python3 -m benchmark.data_generation.pipeline --config path/to/config.yaml --kb-names calc1
 ```
 
-### 输出
+### Outputs
 
 - `benchmark/data/generated/benchmark_{timestamp}/`
-  - `{entry_id}.json`：单条 entry
-  - `_all_entries.jsonl`：全部 entries
-  - `_summary.json`：统计摘要
-- `benchmark/data/generated/knowledge_scopes/{kb_name}.json`：knowledge scope
+  - `{entry_id}.json`: one entry per file
+  - `_all_entries.jsonl`: all entries in one JSONL file
+  - `_summary.json`: summary statistics
+- `benchmark/data/generated/knowledge_scopes/{kb_name}.json`: generated knowledge scope
 
----
+## 2. Conversation Simulation
 
-## 二、对话模拟 (Simulation)
+### Modes
 
-### 模式
+1. **Interactive**: a human acts as the tutor in the terminal or editor
+2. **Auto**: an LLM acts as a mock tutor
 
-1. **Interactive**：人扮演 tutor，在终端或编辑器中输入回复
-2. **Auto**：LLM 扮演 mock tutor
-
-### 单次对话
+### Single Conversation
 
 ```bash
-# 交互模式（默认用 $EDITOR）
+# Interactive mode (uses $EDITOR by default)
 python3 -m benchmark.simulation.conversation --entry benchmark/data/generated/benchmark_xxx/calc1_xxx_task_001.json
 
-# 控制台输入（空行 + Enter 发送）
+# Inline terminal input
 python3 -m benchmark.simulation.conversation --entry path/to/entry.json --inline
 
-# Auto 模式（LLM 当 tutor）
+# Auto mode
 python3 -m benchmark.simulation.conversation --entry path/to/entry.json --auto --max-turns 10
 ```
 
-### 多 Session（同一学生多次返回）
+### Multi-Session Runs
 
 ```bash
-# 按 profile 从 JSONL 筛选，跑多 session
+# Filter by profile from a JSONL file
 python3 -m benchmark.simulation.conversation \
   --entry benchmark/data/generated/benchmark_xxx/_all_entries.jsonl \
   --profile calc1_beginner_00 \
   --multi-session --auto
 
-# 显式指定 entry 列表
+# Explicit list of entries
 python3 -m benchmark.simulation.conversation \
   --entries entry1.json,entry2.json,entry3.json \
   --multi-session --auto
 
-# 关闭 profile 演化
+# Disable profile evolution
 python3 -m benchmark.simulation.conversation --entry ... --profile ... --multi-session --no-evolve
 ```
 
-### 输出
+### Outputs
 
-- Transcript 保存到 `benchmark/data/transcripts/`
-- 单 session：`{entry_id}_{timestamp}.json`
-- 多 session：`multi_{profile_id}_{timestamp}.json`
+- Transcripts are saved under `benchmark/data/transcripts/`
+- Single-session files use `{entry_id}_{timestamp}.json`
+- Multi-session files use `multi_{profile_id}_{timestamp}.json`
 
----
+## 3. Evaluation
 
-## 三、评测 (Evaluation)
+### Metrics
 
-### 评测指标
+**Turn-level** metrics:
+- 50% personalization: `profile_adaptation`, `misconception_targeting`
+- 25% response quality: `response_quality`, `engagement`
+- 25% knowledge alignment: `knowledge_source_alignment`
 
-**Turn 级**（单轮回复）：
-- 50% 个性化：`profile_adaptation`、`misconception_targeting`
-- 25% 有效性：`response_quality`、`engagement`
-- 25% 知识源对齐：`knowledge_source_alignment`（有 source_content 时）
+**Dialogue-level** metrics:
+- 50% personalization: `adaptation_consistency`, `gap_resolution`, `success_criteria_met`
+- 25% dialogue quality: `session_quality`, `student_agency`
+- 25% knowledge alignment: `knowledge_source_alignment`
 
-**Dialog 级**（整场对话）：
-- 50% 个性化：`adaptation_consistency`、`gap_resolution`、`success_criteria_met`
-- 25% 质量：`session_quality`、`student_agency`
-- 25% 知识源对齐：`knowledge_source_alignment`
+The combined score is:
 
-**综合分数**：`combined_overall_score` = 0.4 × Turn 平均 + 0.6 × Dialog 分数
+`combined_overall_score = 0.4 * average_turn_score + 0.6 * dialogue_score`
 
-### 使用方法
+### Usage
 
 ```bash
-# 评测单个 transcript
+# Evaluate one transcript
 python3 -m benchmark.evaluation.run --transcript benchmark/data/transcripts/xxx.json
 
-# 仅 dialog 级（更快）
+# Dialogue-only evaluation
 python3 -m benchmark.evaluation.run --transcript xxx.json --dialog-only
 
-# 评测目录下所有 transcript
+# Evaluate all transcripts in a directory
 python3 -m benchmark.evaluation.run --transcript-dir benchmark/data/transcripts
 
-# 指定输出路径
+# Custom output path
 python3 -m benchmark.evaluation.run --transcript xxx.json -o results.json
 ```
 
-### 输出
+### Outputs
 
-- 默认保存到 `benchmark/data/evaluations/{stem}_eval_{timestamp}.json`
-- 支持单 session 与 multi-session transcript
+- Saved by default to `benchmark/data/evaluations/{stem}_eval_{timestamp}.json`
+- Supports both single-session and multi-session transcripts
 
----
-
-## 四、完整工作流示例
+## 4. End-to-End Example
 
 ```bash
-# 1. 生成数据
+# 1. Generate data
 python3 -m benchmark.data_generation.pipeline --kb-names calc1
 
-# 2. 运行对话（auto 或 interactive）
+# 2. Run a conversation
 python3 -m benchmark.simulation.conversation \
   --entry benchmark/data/generated/benchmark_xxx/_all_entries.jsonl \
   --profile calc1_beginner_00 \
   --multi-session --auto --max-turns 5
 
-# 3. 评测 transcript
+# 3. Evaluate the transcript
 python3 -m benchmark.evaluation.run \
   --transcript benchmark/data/transcripts/multi_calc1_beginner_00_xxx.json
 ```
 
----
+## 5. CLI Quick Reference
 
-## 五、CLI 参数速查
+### Data Generation
 
-### 数据生成 (`benchmark.data_generation.pipeline`)
+| Argument | Description |
+|----------|-------------|
+| `--config` | Path to the config file |
+| `--kb-names` | Comma-separated KB names overriding config defaults |
 
-| 参数 | 说明 |
-|------|------|
-| `--config` | 配置文件路径 |
-| `--kb-names` | 指定 KB 名称列表（覆盖 config） |
+### Conversation Simulation
 
-### 对话模拟 (`benchmark.simulation.conversation`)
+| Argument | Description |
+|----------|-------------|
+| `--entry` | Entry JSON or JSONL path |
+| `--multi-session` | Enable multi-session mode |
+| `--profile` | `profile_id` filter used with `--entry` + `--multi-session` |
+| `--entries` | Comma-separated entry paths for multi-session runs |
+| `--no-evolve` | Disable profile evolution |
+| `--auto` | Use an LLM as the tutor |
+| `--max-turns` | Maximum number of dialogue turns |
+| `--output-dir` | Transcript output directory |
+| `--entry-index` | Entry index when reading JSONL |
+| `--inline` | Use terminal input instead of an external editor |
 
-| 参数 | 说明 |
-|------|------|
-| `--entry` | Entry JSON 或 JSONL 路径 |
-| `--multi-session` | 多 session 模式 |
-| `--profile` | 从 JSONL 筛选的 profile_id（配合 `--entry` + `--multi-session`） |
-| `--entries` | 逗号分隔的 entry 路径（配合 `--multi-session`） |
-| `--no-evolve` | 关闭 profile 演化 |
-| `--auto` | LLM 扮演 tutor |
-| `--max-turns` | 最大轮数（默认 20） |
-| `--output-dir` | transcript 输出目录 |
-| `--entry-index` | JSONL 时使用的 entry 索引（默认 0） |
-| `--inline` | 控制台输入（否则用编辑器） |
+### Evaluation
 
-### 评测 (`benchmark.evaluation.run`)
+| Argument | Description |
+|----------|-------------|
+| `--transcript` | Path to a single transcript |
+| `--transcript-dir` | Directory of transcripts to evaluate |
+| `--dialog-only` | Skip turn-level scoring |
+| `--output` / `-o` | Output path for results |
+| `--temperature` | Judge model temperature |
+| `--verbose` / `-v` | Enable debug logging |
 
-| 参数 | 说明 |
-|------|------|
-| `--transcript` | 单个 transcript 路径 |
-| `--transcript-dir` | transcript 目录（评测全部） |
-| `--dialog-only` | 仅 dialog 级评测 |
-| `--output` / `-o` | 结果输出路径 |
-| `--temperature` | LLM 温度（默认 0.2） |
-| `--verbose` / `-v` | 调试日志 |
+## 6. Key Files
 
----
-
-## 六、关键文件说明
-
-| 文件 | 作用 |
-|------|------|
-| `data_generation/pipeline.py` | 数据生成主流程 |
-| `data_generation/content_loader.py` | 从 content_list 加载连续 10 页 |
-| `data_generation/gap_generator.py` | 生成 page-grounded gaps |
-| `data_generation/task_generator.py` | 生成 tasks + 拒绝采样 |
-| `simulation/student_agent.py` | LLM 学生角色 |
-| `simulation/conversation.py` | 对话运行器（单/多 session） |
-| `simulation/profile_evolver.py` | 多 session 间 profile 演化 |
-| `evaluation/evaluator.py` | LLM-as-judge 评测逻辑 |
+| File | Purpose |
+|------|---------|
+| `data_generation/pipeline.py` | Main data-generation pipeline |
+| `data_generation/content_loader.py` | Loads contiguous pages from `content_list` |
+| `data_generation/gap_generator.py` | Generates page-grounded gaps |
+| `data_generation/task_generator.py` | Generates tasks with rejection sampling |
+| `simulation/student_agent.py` | LLM-based student role |
+| `simulation/conversation.py` | Single-session and multi-session runner |
+| `simulation/profile_evolver.py` | Evolves student profiles across sessions |
+| `evaluation/evaluator.py` | LLM-as-judge evaluation logic |

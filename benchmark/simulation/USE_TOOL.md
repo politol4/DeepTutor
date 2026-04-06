@@ -1,39 +1,39 @@
-# Simulator Tools 使用指南
+# Simulator Tools Guide
 
-## 概述
+## Overview
 
-三个异步工具，供学生 Agent 调用，完整覆盖 **解题 → 出题 → 做答** 流程，并自动集成 Memory 系统。
+This module provides three async tools for student agents. Together they cover the full **solve -> generate -> answer** workflow and integrate with the memory system automatically.
 
-每个学生通过独立的 `workspace` 路径实现数据隔离——所有产出文件（解题记录、出题批次、trace、memory 文档）均保存在该路径下，Memory Agent 也只读取该路径内的历史数据。
+Each student uses an isolated `workspace` directory. All outputs, including solve traces, generated question batches, and memory files, are stored under that workspace, and the memory agents read only from that workspace.
 
-## Workspace 目录结构
+## Workspace Layout
 
-```
+```text
 workspace/
-├── memory/                        # 记忆系统
-│   ├── traces/                    # trace 森林
+├── memory/
+│   ├── traces/
 │   │   ├── index.json
 │   │   ├── embeddings.json
 │   │   └── {trace_id}.json
-│   ├── logs/                      # memory agent 日志
-│   ├── memory.md                  # 学习总结 (SummaryAgent)
-│   ├── weakness.md                # 薄弱点 (WeaknessAgent)
-│   └── reflection.md              # 反思 (ReflectionAgent)
-├── solve/                         # 解题输出
+│   ├── logs/
+│   ├── memory.md
+│   ├── weakness.md
+│   └── reflection.md
+├── solve/
 │   └── solve_YYYYMMDD_HHMMSS/
 │       ├── scratchpad.json
 │       ├── final_answer.md
 │       └── cost_report.json
-└── question/                      # 出题输出
+└── question/
     └── batch_YYYYMMDD_HHMMSS/
         ├── templates.json
         ├── summary.json
         └── q_X_result.json
 ```
 
-## 工具 API
+## Tool APIs
 
-### 1. `solve_question` — 解题
+### 1. `solve_question`
 
 ```python
 from benchmark.simulation import solve_question
@@ -41,26 +41,26 @@ from benchmark.simulation import solve_question
 result = await solve_question(
     workspace="/path/to/student_001",
     kb_name="ai-textbook",
-    question="什么是拉格朗日乘数法？",
-    language="zh",            # 可选，默认 "en"
+    question="What is the method of Lagrange multipliers?",
+    language="en",
 )
 ```
 
-**输入参数**
+**Arguments**
 
-| 参数 | 类型 | 说明 |
+| Argument | Type | Description |
 |---|---|---|
-| `workspace` | `str` | 学生 workspace 根路径 |
-| `kb_name` | `str` | 知识库名称 |
-| `question` | `str` | 学生提出的问题 |
-| `language` | `str` | 语言（`en` / `zh`），默认 `en` |
+| `workspace` | `str` | Root path of the student's workspace |
+| `kb_name` | `str` | Knowledge base name |
+| `question` | `str` | Student question |
+| `language` | `str` | Output language, default `en` |
 
-**返回值**
+**Return value**
 
 ```python
 {
-    "question": "什么是拉格朗日乘数法？",
-    "answer": "拉格朗日乘数法是一种...",       # 完整解答
+    "question": "What is the method of Lagrange multipliers?",
+    "answer": "The method of Lagrange multipliers is ...",
     "output_dir": "/path/to/.../solve_20260220_143022",
     "steps": 3,
     "completed_steps": 3,
@@ -68,11 +68,9 @@ result = await solve_question(
 }
 ```
 
-**内部流程**: Plan → ReAct → Write → 构建 trace → 注册到 trace forest → 运行三个 Memory Agent 更新 memory.md / weakness.md / reflection.md。
+**Internal flow**: `Plan -> ReAct -> Write -> trace creation -> trace forest registration -> memory agent updates`.
 
----
-
-### 2. `generate_questions` — 出题
+### 2. `generate_questions`
 
 ```python
 from benchmark.simulation import generate_questions
@@ -80,25 +78,25 @@ from benchmark.simulation import generate_questions
 result = await generate_questions(
     workspace="/path/to/student_001",
     kb_name="ai-textbook",
-    topic="线性代数中的特征值分解",
-    preferences="侧重应用和计算",   # 可选
-    num_questions=3,               # 可选，默认 3
-    language="zh",                 # 可选，默认 "en"
+    topic="Eigenvalue decomposition in linear algebra",
+    preferences="Focus on applied and computational questions",
+    num_questions=3,
+    language="en",
 )
 ```
 
-**输入参数**
+**Arguments**
 
-| 参数 | 类型 | 说明 |
+| Argument | Type | Description |
 |---|---|---|
-| `workspace` | `str` | 学生 workspace 根路径 |
-| `kb_name` | `str` | 知识库名称 |
-| `topic` | `str` | 出题主题 |
-| `preferences` | `str` | 个人偏好/要求，可为空 |
-| `num_questions` | `int` | 题目数量，默认 3 |
-| `language` | `str` | 语言，默认 `en` |
+| `workspace` | `str` | Root path of the student's workspace |
+| `kb_name` | `str` | Knowledge base name |
+| `topic` | `str` | Topic for question generation |
+| `preferences` | `str` | Optional user preferences |
+| `num_questions` | `int` | Number of questions to generate |
+| `language` | `str` | Output language, default `en` |
 
-**返回值**
+**Return value**
 
 ```python
 {
@@ -108,46 +106,43 @@ result = await generate_questions(
     "questions": [
         {
             "question_id": "q_1",
-            "question": "下列关于特征值的说法，正确的是？",
+            "question": "Which statement about eigenvalues is correct?",
             "options": {"A": "...", "B": "...", "C": "...", "D": "..."},
             "question_type": "choice",
         },
-        # ...
     ],
 }
 ```
 
-> **注意**: 返回的 `questions` 中 **不含正确答案**，防止学生 Agent "作弊"。正确答案存储在 `summary.json` 中，由 `submit_answers` 在判分时读取。
+`questions` intentionally omits the correct answers so the student agent cannot peek. Correct answers stay in `summary.json` and are read later by `submit_answers`.
 
----
-
-### 3. `submit_answers` — 做答
+### 3. `submit_answers`
 
 ```python
 from benchmark.simulation import submit_answers
 
 result = await submit_answers(
     workspace="/path/to/student_001",
-    batch_id="batch_20260220_150000",  # 来自 generate_questions 的返回
+    batch_id="batch_20260220_150000",
     answers=[
         {"question_id": "q_1", "answer": "A"},
         {"question_id": "q_2", "answer": "C"},
         {"question_id": "q_3", "answer": "B"},
     ],
-    language="zh",
+    language="en",
 )
 ```
 
-**输入参数**
+**Arguments**
 
-| 参数 | 类型 | 说明 |
+| Argument | Type | Description |
 |---|---|---|
-| `workspace` | `str` | 学生 workspace 根路径 |
-| `batch_id` | `str` | `generate_questions` 返回的 `batch_id` |
-| `answers` | `list[dict]` | `[{"question_id": "q_1", "answer": "A"}, ...]` |
-| `language` | `str` | 语言，默认 `en` |
+| `workspace` | `str` | Root path of the student's workspace |
+| `batch_id` | `str` | Batch ID returned by `generate_questions` |
+| `answers` | `list[dict]` | Answer list such as `[{"question_id": "q_1", "answer": "A"}]` |
+| `language` | `str` | Output language, default `en` |
 
-**返回值**
+**Return value**
 
 ```python
 {
@@ -156,10 +151,9 @@ result = await submit_answers(
             "question_id": "q_1",
             "user_answer": "A",
             "correct_answer": "A",
-            "judged_result": "correct",   # correct / wrong / skipped
-            "explanation": "因为...",
+            "judged_result": "correct",
+            "explanation": "Because ...",
         },
-        # ...
     ],
     "score": {
         "total": 3,
@@ -170,11 +164,9 @@ result = await submit_answers(
 }
 ```
 
-**内部流程**: 从 `summary.json` 读取正确答案 → 自动判分 → 将答题节点写入 trace → 运行三个 Memory Agent 更新记忆。
+**Internal flow**: read answers from `summary.json`, grade automatically, append answer traces, and update memory files.
 
----
-
-## 典型调用流程
+## Typical Usage
 
 ```python
 import asyncio
@@ -184,43 +176,46 @@ WS = "/data/eval/student_001"
 KB = "ai-textbook"
 
 async def main():
-    # ① 解题（自动带 memory）
     solve_result = await solve_question(
-        workspace=WS, kb_name=KB,
-        question="什么是梯度下降？", language="zh",
+        workspace=WS,
+        kb_name=KB,
+        question="What is gradient descent?",
+        language="en",
     )
     print(solve_result["answer"])
 
-    # ② 出题
     gen_result = await generate_questions(
-        workspace=WS, kb_name=KB,
-        topic="反向传播算法", num_questions=3, language="zh",
+        workspace=WS,
+        kb_name=KB,
+        topic="Backpropagation",
+        num_questions=3,
+        language="en",
     )
 
-    # ③ 学生 Agent 思考后做答
     answers = []
     for q in gen_result["questions"]:
-        answer = student_agent_think(q)  # 你自己的学生 Agent 逻辑
+        answer = student_agent_think(q)
         answers.append({"question_id": q["question_id"], "answer": answer})
 
-    # ④ 提交答案（自动判分 + 更新 memory）
     ans_result = await submit_answers(
-        workspace=WS, batch_id=gen_result["batch_id"],
-        answers=answers, language="zh",
+        workspace=WS,
+        batch_id=gen_result["batch_id"],
+        answers=answers,
+        language="en",
     )
-    print(f"得分: {ans_result['score']['correct']}/{ans_result['score']['total']}")
+    print(f"Score: {ans_result['score']['correct']}/{ans_result['score']['total']}")
 
 asyncio.run(main())
 ```
 
-## 多学生并行模拟
+## Parallel Simulation
 
-不同学生使用不同的 `workspace` 路径，即可完全隔离。可通过 `asyncio.gather` 并行运行多个学生：
+Use different `workspace` paths for different students. That gives complete isolation and works naturally with `asyncio.gather`:
 
 ```python
 async def simulate_student(student_id: str):
     ws = f"/data/eval/student_{student_id}"
-    # ... 调用 solve_question / generate_questions / submit_answers ...
+    # call solve_question / generate_questions / submit_answers here
 
 await asyncio.gather(
     simulate_student("001"),
@@ -229,6 +224,6 @@ await asyncio.gather(
 )
 ```
 
-## 依赖
+## Requirements
 
-使用前确保项目根目录的 `.env` 或 `DeepTutor.env` 中配置了 LLM API 凭证，且目标知识库已在 `data/knowledge_bases/` 中构建完成。
+Before using these tools, make sure `.env` or `DeepTutor.env` contains valid LLM credentials and the target knowledge base has already been built under `data/knowledge_bases/`.

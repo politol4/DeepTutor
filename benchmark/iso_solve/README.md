@@ -1,30 +1,28 @@
 # iso_solve
 
-`iso_solve` 用于隔离评估 DeepTutor 解题能力，支持同一套评估主流程在多个 benchmark 上复用：
+`iso_solve` is used to evaluate DeepTutor's solving capability in isolation. It supports a shared evaluation pipeline that can be reused across multiple benchmarks.
 
-- `direct`：直接调用 LLM 解题
-- `pipeline`：调用 DeepTutor 的 Plan -> ReAct -> Write 解题链路
+- `direct`: solve questions with a direct LLM call
+- `pipeline`: solve questions through DeepTutor's `Plan -> ReAct -> Write` pipeline
 
-评估逻辑统一为两步：
+The evaluation logic always has two steps:
 
-1. 基于题目 + 模型输出（`output.md` / `final_answer.md` 内容）使用 LLM 抽取最终答案
-2. 基于抽取答案 + GT 使用 LLM 判分（正确/错误）
+1. Extract the final answer from the problem statement and model output (`output.md` or `final_answer.md`) with an LLM
+2. Compare the extracted answer with the ground truth using an LLM judge
 
----
-
-## 目录结构
+## Directory Structure
 
 ```text
 benchmark/iso_solve/
-├── run_benchmark.py          # 统一 CLI 入口
-├── config.yaml               # 统一配置
-├── core/                     # 通用评估框架
+├── run_benchmark.py          # Unified CLI entry point
+├── config.yaml               # Shared configuration
+├── core/                     # Common evaluation framework
 │   ├── types.py
 │   ├── extractor.py
 │   ├── judge.py
 │   ├── pipeline.py
 │   └── runner.py
-├── eval/                     # benchmark 适配层
+├── eval/                     # Benchmark adapters
 │   ├── base.py
 │   ├── math.py
 │   ├── gpqa.py
@@ -33,28 +31,24 @@ benchmark/iso_solve/
 │   ├── hle.py
 │   ├── livebench.py
 │   └── scorers/
-└── results/                  # 所有评估产物
+└── results/                  # All evaluation outputs
 ```
 
----
-
-## 核心设计
+## Design Overview
 
 - `core/runner.py`
-  - 统一并发调度、结果落盘、report 汇总
-  - 与 benchmark 无关
+  - Handles concurrency, result persistence, and report generation
+  - Remains benchmark-agnostic
 - `eval/*.py`
-  - 只负责数据加载、过滤、prompt/metadata 差异
-  - 每个 benchmark 通过 adapter 接入
+  - Handles data loading, filtering, and benchmark-specific prompt or metadata differences
+  - Integrates each benchmark through an adapter layer
 - `core/extractor.py` + `core/judge.py`
-  - 统一的 LLM 抽取与 LLM 判分能力
-  - 全局配置由 `config.yaml` 的 `evaluation` 控制
+  - Provide shared LLM-based answer extraction and judging
+  - Use the global `evaluation` section in `config.yaml`
 
----
+## Configuration
 
-## 配置说明
-
-全局评估开关（单一真值来源）：
+Global evaluation switches are defined in one place:
 
 ```yaml
 evaluation:
@@ -66,113 +60,92 @@ evaluation:
   judge_max_tokens: 128
 ```
 
-说明：
+Notes:
 
-- `extract_model` / `judge_model` 为 `null` 时使用默认 LLM 配置
-- `extract_max_tokens` / `judge_max_tokens` 控制抽取和判分模型的输出长度
-- benchmark 子配置不再单独控制 extract/judge 的模型和开关
+- If `extract_model` or `judge_model` is `null`, the default LLM configuration is used
+- `extract_max_tokens` and `judge_max_tokens` control output length for extraction and judging
+- Benchmark-specific configs no longer control extract/judge models or feature toggles independently
 
----
+## Running Benchmarks
 
-## 运行方式
+Run commands from the project root.
 
-从项目根目录执行：
-
-### MATH（config 默认 500 题，Level 3-5）
+### MATH
 
 ```bash
-# direct 少量
+# direct, small run
 python -m benchmark.iso_solve.run_benchmark --benchmark math --mode direct --config benchmark/iso_solve/config.yaml --limit 5
-# direct 全量
+
+# direct, full run
 python -m benchmark.iso_solve.run_benchmark --benchmark math --mode direct --config benchmark/iso_solve/config.yaml
-# pipeline 少量
+
+# pipeline, small run
 python -m benchmark.iso_solve.run_benchmark --benchmark math --mode pipeline --config benchmark/iso_solve/config.yaml --limit 5
-# pipeline 全量
+
+# pipeline, full run
 python -m benchmark.iso_solve.run_benchmark --benchmark math --mode pipeline --config benchmark/iso_solve/config.yaml
 ```
 
-### GPQA-Diamond（共 198 题）
+### GPQA-Diamond
 
 ```bash
-# direct 少量
 python -m benchmark.iso_solve.run_benchmark --benchmark gpqa --mode direct --config benchmark/iso_solve/config.yaml --limit 5
-# direct 全量
 python -m benchmark.iso_solve.run_benchmark --benchmark gpqa --mode direct --config benchmark/iso_solve/config.yaml
-# pipeline 少量
 python -m benchmark.iso_solve.run_benchmark --benchmark gpqa --mode pipeline --config benchmark/iso_solve/config.yaml --limit 5
-# pipeline 全量
 python -m benchmark.iso_solve.run_benchmark --benchmark gpqa --mode pipeline --config benchmark/iso_solve/config.yaml
 ```
 
-### AIME 2025（共 30 题，Part I + II）
+### AIME 2025
 
 ```bash
-# direct 少量
 python -m benchmark.iso_solve.run_benchmark --benchmark aime25 --mode direct --config benchmark/iso_solve/config.yaml --limit 5
-# direct 全量
 python -m benchmark.iso_solve.run_benchmark --benchmark aime25 --mode direct --config benchmark/iso_solve/config.yaml
-# pipeline 少量
 python -m benchmark.iso_solve.run_benchmark --benchmark aime25 --mode pipeline --config benchmark/iso_solve/config.yaml --limit 5
-# pipeline 全量
 python -m benchmark.iso_solve.run_benchmark --benchmark aime25 --mode pipeline --config benchmark/iso_solve/config.yaml
 ```
 
-### HLE（config 默认 100 题）
+### HLE
 
 ```bash
-# direct 少量
 python -m benchmark.iso_solve.run_benchmark --benchmark hle --mode direct --config benchmark/iso_solve/config.yaml --limit 5
-# direct 全量
 python -m benchmark.iso_solve.run_benchmark --benchmark hle --mode direct --config benchmark/iso_solve/config.yaml
-# pipeline 少量
 python -m benchmark.iso_solve.run_benchmark --benchmark hle --mode pipeline --config benchmark/iso_solve/config.yaml --limit 5
-# pipeline 全量
 python -m benchmark.iso_solve.run_benchmark --benchmark hle --mode pipeline --config benchmark/iso_solve/config.yaml
 ```
 
-### GAIA（config 默认 10 题，需 `huggingface-cli login`）
+### GAIA
 
 ```bash
-# direct 少量
 python -m benchmark.iso_solve.run_benchmark --benchmark gaia --mode direct --config benchmark/iso_solve/config.yaml --limit 3
-# direct 全量
 python -m benchmark.iso_solve.run_benchmark --benchmark gaia --mode direct --config benchmark/iso_solve/config.yaml
-# pipeline 少量
 python -m benchmark.iso_solve.run_benchmark --benchmark gaia --mode pipeline --config benchmark/iso_solve/config.yaml --limit 3
-# pipeline 全量
 python -m benchmark.iso_solve.run_benchmark --benchmark gaia --mode pipeline --config benchmark/iso_solve/config.yaml
 ```
 
-### LiveBench（共 ~1436 题）
+### LiveBench
 
 ```bash
-# direct 少量
 python -m benchmark.iso_solve.run_benchmark --benchmark livebench --mode direct --config benchmark/iso_solve/config.yaml --limit 20
-# direct 全量
 python -m benchmark.iso_solve.run_benchmark --benchmark livebench --mode direct --config benchmark/iso_solve/config.yaml
-# pipeline 少量
 python -m benchmark.iso_solve.run_benchmark --benchmark livebench --mode pipeline --config benchmark/iso_solve/config.yaml --limit 20
-# pipeline 全量
 python -m benchmark.iso_solve.run_benchmark --benchmark livebench --mode pipeline --config benchmark/iso_solve/config.yaml
 ```
 
-### 常见参数
+### Common Arguments
 
-| 参数 | 说明 |
-|------|------|
-| `--benchmark` | `math \| gpqa \| aime25 \| hle \| gaia \| livebench` |
-| `--mode` | `direct \| pipeline` |
-| `--limit N` | 限制样本数（覆盖 config.yaml 中的 `filter.limit`） |
-| `--seed N` | 采样随机种子 |
-| `--output DIR` | 自定义结果根目录（默认 `benchmark/iso_solve/results`） |
-| `--dry-run` | 仅验证数据加载与过滤，不触发 LLM 调用 |
-| `-v` | 开启 DEBUG 日志 |
+| Argument | Description |
+|----------|-------------|
+| `--benchmark` | `math | gpqa | aime25 | hle | gaia | livebench` |
+| `--mode` | `direct | pipeline` |
+| `--limit N` | Limit the sample count and override `filter.limit` in `config.yaml` |
+| `--seed N` | Random seed for sampling |
+| `--output DIR` | Custom result root directory |
+| `--dry-run` | Validate data loading and filtering without calling an LLM |
+| `-v` | Enable DEBUG logging |
 
----
+## Result Layout
 
-## 结果目录规范
-
-每次实验按 benchmark / mode / run 分层：
+Each run is organized by benchmark, mode, and timestamped model directory:
 
 ```text
 results/{benchmark}/{mode}/{model}_{YYYYMMDD_HHMMSS}/
@@ -182,18 +155,16 @@ results/{benchmark}/{mode}/{model}_{YYYYMMDD_HHMMSS}/
     ├── 0000/
     │   ├── output.md
     │   ├── meta.json
-    │   ├── scratchpad.json      # pipeline 模式由 solver 生成
-    │   ├── cost_report.json     # pipeline 模式由 solver 生成
-    │   ├── task.log             # pipeline 模式由 solver 生成
-    │   └── code_runs/           # pipeline+code_execute 产生
+    │   ├── scratchpad.json
+    │   ├── cost_report.json
+    │   ├── task.log
+    │   └── code_runs/
     │       └── exec_*/...
     └── 0001/
 ```
 
----
+## About `code_execute` Artifacts
 
-## 关于 code_execute 产物落盘
+When `pipeline` mode calls `code_execute`, the execution directory is written into the current problem's solve output directory (`code_runs/exec_*`) rather than the global `run_code_workspace`.
 
-`pipeline` 模式下如果调用 `code_execute`，其执行目录会写入当前题目的 solve 输出目录下（`code_runs/exec_*`），而不是全局 `run_code_workspace`。
-
-这使得单次实验目录具备完整可复现性：题目输出、推理轨迹、开销和代码执行产物全部在同一条目录树内。
+This keeps each experiment directory self-contained and reproducible: outputs, reasoning traces, cost reports, and code-execution artifacts all live under the same directory tree.
