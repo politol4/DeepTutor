@@ -221,43 +221,16 @@ Simulator workspace tools: `solve_question()`, `generate_questions()`, `submit_a
 
 ### Table 1 — Main results on TutorBench (interactive evaluation)
 
-Upper block: baselines. Lower block: DeepTutor and ablations. *Avg* = group mean for solve or practice columns; **OQ** = overall quality across all ten metrics; **Δ%** = relative to Naive Tutor. All scores 1–5 (↑). **Bold** = best; *underline* = second best (reproduced from the report).
-
-
-| System            | SF       | PER      | APP      | VID      | LD       | Solve Avg | FIT      | GND      | DIV      | ANS      | CC       | Practice Avg | OQ       | Δ%          |
-| ----------------- | -------- | -------- | -------- | -------- | -------- | --------- | -------- | -------- | -------- | -------- | -------- | ------------ | -------- | ----------- |
-| Naive Tutor       | 3.22     | 4.24     | 4.44     | 3.89     | 3.99     | 3.96      | 3.20     | 2.46     | 2.83     | 3.87     | 3.12     | 3.10         | 3.53     | —           |
-| CoT Tutor         | 3.34     | 4.22     | 4.47     | 3.82     | 4.01     | 3.97      | 3.18     | 2.50     | 2.79     | 3.81     | 3.04     | 3.06         | 3.52     | −0.28%      |
-| Self-Refine Tutor | 3.28     | 4.28     | **4.61** | 3.94     | 4.14     | 4.05      | 3.17     | 2.49     | 2.88     | 3.88     | 2.97     | 3.08         | 3.57     | +1.13%      |
-| ReAct Tutor       | *3.35*   | 4.37     | 4.40     | 3.70     | 3.96     | 3.96      | 3.16     | 2.47     | 2.75     | *3.94*   | 3.07     | 3.08         | 3.52     | −0.28%      |
-| **DeepTutor**     | **3.36** | **4.59** | 4.56     | 4.81     | **4.61** | **4.39**  | **3.35** | **2.96** | **3.44** | **3.98** | **3.38** | **3.42**     | **3.91** | **+10.76%** |
-| w/o Memory        | **3.36** | 4.22     | 4.57     | **4.83** | 4.52     | *4.30*    | 3.15     | *2.80*   | *3.34*   | 3.90     | *3.31*   | *3.30*       | *3.80*   | +7.65%      |
-| w/o RAG           | 3.11     | *4.41*   | 4.55     | **4.83** | *4.53*   | 4.29      | *3.31*   | 2.23     | 3.30     | 3.84     | 3.19     | 3.17         | 3.73     | +5.67%      |
-| w/o RAG + Memory  | 3.16     | 4.17     | *4.60*   | *4.82*   | 4.48     | 4.25      | 3.25     | 2.22     | 3.27     | 3.85     | 3.14     | 3.15         | 3.70     | +4.82%      |
-
-
-**Metrics:** SF = Source Faithfulness, PER = Personalization, APP = Applicability, VID = Vividness, LD = Logical Depth; FIT = Fitness, GND = Groundedness, DIV = Diversity, ANS = Answer Quality, CC = Cross Concept.
+<p align="center">
+  <img src="assets/figs/table-1.png" alt="Table 1: Main results on TutorBench" width="820" />
+</p>
 
 ### Table 2 — General problem-solving (pass@1)
 
-The solve pipeline is evaluated with personalization disabled on standard benchmarks. Each pair compares the bare backbone vs. the same backbone with DeepTutor’s pipeline. *Avg Δ* is the average relative gain for that pair (from the report).
+<p align="center">
+  <img src="assets/figs/table-2.png" alt="Table 2: General problem-solving pass@1 scores" width="820" />
+</p>
 
-
-| Pass@1         | HLE*      | GPQA-D**  | LiveBench*** | GAIA L1   | L2        | L3        | GAIA Overall† | AA-LCR    | Avg Δ       |
-| -------------- | --------- | --------- | ------------ | --------- | --------- | --------- | ------------- | --------- | ----------- |
-| Gemini-3-Flash | 19.40     | 81.31     | 70.00        | 43.40     | 40.70     | 15.38     | 37.58         | 63.00     | **+29.12%** |
-| + DeepTutor    | **30.80** | **84.85** | **96.00**    | **56.60** | **50.00** | **23.08** | **47.88**     | **74.67** |             |
-| Sonnet-4.5     | 8.40      | 72.22     | 64.33        | 37.74     | 30.23     | 7.69      | 29.09         | 53.33     | **+32.03%** |
-| + DeepTutor    | **14.60** | **73.23** | **82.00**    | **50.94** | **48.84** | **23.08** | **45.45**     | **54.00** |             |
-| Qwen-3.5-Plus  | 16.80     | 88.38     | 69.00        | 44.23     | 35.71     | 13.64     | 33.94         | 66.00     | **+23.00%** |
-| + DeepTutor    | **24.20** | 87.88     | **93.00**    | **50.94** | **53.49** | **32.00** | **49.09**     | **69.67** |             |
-| GPT-5-Mini     | 16.46     | 80.81     | 71.00        | 32.08     | 30.23     | 7.69      | 27.27         | 68.67     | **+27.11%** |
-| + DeepTutor    | **21.20** | 80.30     | **93.00**    | **54.72** | **52.33** | **26.92** | **49.09**     | **71.00** |             |
-| Minimax-M2.5   | 14.00     | 82.83     | 59.30        | 35.29     | 22.78     | 12.00     | 23.64         | 66.00     | **+31.50%** |
-| + DeepTutor    | **19.40** | **83.33** | **73.00**    | **52.94** | **44.30** | **32.00** | **42.42**     | **76.40** |             |
-
-
-\* Fixed 500-question subset. \*\* GPQA-Diamond. \*\*\* Reasoning subset. † GAIA reported per level (L1–L3).
 
 **Reproduce isolated solve benchmarks** (this branch):
 
@@ -290,6 +263,22 @@ RAG and Memory are ablated in the lower block of Table 1; the radar chart summar
   <img src="assets/figs/ablation-0316.png" alt="Ablation radar — w/o RAG and w/o Memory" width="720" />
 </p>
 <p align="center"><em>Ablation: full DeepTutor (black) vs. w/o RAG (left) and w/o Memory (right). Labels mark the largest drops.</em></p>
+
+Ablation is reproduced by running Step 2 + Step 3 with all four backend variants:
+
+```bash
+# Step 2: generate transcripts for full and ablated variants
+python benchmark/pipeline/step2_generate_transcripts.py \
+  --kb-names "Calculus,LinearAlgebra" \
+  --backends "deep_tutor,deep_tutor_no_rag,deep_tutor_no_memory,deep_tutor_no_rag_memory"
+
+# Step 3: evaluate all variants with the same judge
+python benchmark/pipeline/step3_evaluate_transcripts.py \
+  --kb-names "Calculus,LinearAlgebra" \
+  --backends "deep_tutor,deep_tutor_no_rag,deep_tutor_no_memory,deep_tutor_no_rag_memory"
+```
+
+The per-backend breakdown in `manifests/step3_summary.json` directly yields the ablation rows in Table 1.
 
 ---
 
