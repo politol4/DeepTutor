@@ -83,15 +83,13 @@ Key configuration options:
 > At least one LLM provider must be configured.
 
 > **Personal note:** I primarily use this with Ollama running locally (`http://localhost:11434`). Set `DEFAULT_LLM_PROVIDER=ollama` and `OLLAMA_BASE_URL=http://localhost:11434` to get started without any API keys.
+>
+> I'm currently using `llama3.2:3b` as my default local model — it's fast enough for day-to-day use and fits comfortably in 8 GB of VRAM. For heavier document analysis tasks, swapping to `llama3.1:8b` noticeably improves answer quality.
 
 ## Project Structure
 
 ```
 DeepTutor/
 ├── app.py                  # Main application entry point
-├── pipeline/               # Core RAG and tutoring pipeline
-│   ├── ingestion.py        # Document ingestion and chunking
-│   ├── retrieval.py        # Vector search and retrieval
-│   └── generation.py       # LLM response generation
-├── ui/                     #
+├── pipeline/               # Core RAG and tutori
 ```
