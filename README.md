@@ -82,6 +82,8 @@ Key configuration options:
 
 > At least one LLM provider must be configured.
 
+> **Personal note:** I primarily use this with Ollama running locally (`http://localhost:11434`). Set `DEFAULT_LLM_PROVIDER=ollama` and `OLLAMA_BASE_URL=http://localhost:11434` to get started without any API keys.
+
 ## Project Structure
 
 ```
@@ -91,31 +93,5 @@ DeepTutor/
 │   ├── ingestion.py        # Document ingestion and chunking
 │   ├── retrieval.py        # Vector search and retrieval
 │   └── generation.py       # LLM response generation
-├── ui/                     # Gradio-based user interface
-├── models/                 # Data models and schemas
-├── utils/                  # Utility functions
-├── docker-compose.yml      # Docker Compose configuration
-├── Dockerfile              # Container image definition
-├── requirements.txt        # Python dependencies
-└── .env.example            # Environment variable template
+├── ui/                     #
 ```
-
-## Contributing
-
-Contributions are welcome! Please open an issue first to discuss what you'd like to change.
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feat/amazing-feature`)
-3. Commit your changes following [Conventional Commits](https://www.conventionalcommits.org/)
-4. Push to the branch and open a Pull Request
-
-Please read our issue templates before filing bugs or feature requests.
-
-## License
-
-This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
-
-## Acknowledgements
-
-- Original project: [HKUDS/DeepTutor](https://github.com/HKUDS/DeepTutor)
-- Built with [LangChain](https://github.com/langchain-ai/langchain), [Gradio](https://github.com/gradio-app/gradio), and [ChromaDB](https://github.com/chroma-core/chroma)
