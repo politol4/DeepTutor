@@ -63,6 +63,20 @@ def render_sidebar() -> None:
         st.session_state["selected_model"] = selected_model
 
         st.markdown("---")
+
+        # Added temperature slider so I can quickly tune response creativity
+        # without digging into the code each time
+        temperature = st.slider(
+            "Temperature",
+            min_value=0.0,
+            max_value=1.0,
+            value=0.3,  # lower default for more focused, factual answers
+            step=0.05,
+            help="Controls response randomness. Lower = more deterministic.",
+        )
+        st.session_state["temperature"] = temperature
+
+        st.markdown("---")
         st.caption("DeepTutor v0.1.0 | Fork of HKUDS/DeepTutor")
 
 
@@ -94,8 +108,4 @@ def render_main_content() -> None:
         st.subheader("Tutoring Session")
         st.info(
             "💡 Chat interface will appear here. "
-            "Ask questions about your document and get AI-powered explanations."
-        )
-    else:
-        # Show instructions when no file is uploaded
-        s
+            "Ask questions about 
