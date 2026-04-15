@@ -51,8 +51,9 @@ def render_sidebar() -> None:
 
         st.subheader("Settings")
 
-        # Model selection
-        model_options = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"]
+        # Model selection — defaulting to gpt-4o-mini since it's faster and
+        # cheaper for personal use; switch to gpt-4o when accuracy matters more
+        model_options = ["gpt-4o-mini", "gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"]
         selected_model = st.selectbox(
             "LLM Model",
             model_options,
@@ -97,25 +98,4 @@ def render_main_content() -> None:
         )
     else:
         # Show instructions when no file is uploaded
-        st.markdown("---")
-        with st.expander("How to use DeepTutor", expanded=True):
-            st.markdown(
-                """
-            1. **Upload** a PDF document using the file uploader above.
-            2. **Ask questions** about the content in the chat interface.
-            3. **Learn** with AI-powered explanations and guidance.
-            """
-            )
-
-
-def main() -> None:
-    """Main application entry point."""
-    if not check_environment():
-        st.stop()
-
-    render_sidebar()
-    render_main_content()
-
-
-if __name__ == "__main__":
-    main()
+        s
