@@ -77,6 +77,20 @@ def render_sidebar() -> None:
         st.session_state["temperature"] = temperature
 
         st.markdown("---")
+
+        # Max tokens cap — I kept hitting long responses that were hard to read;
+        # 1024 feels like a sweet spot for study sessions
+        max_tokens = st.slider(
+            "Max Response Tokens",
+            min_value=256,
+            max_value=4096,
+            value=1024,
+            step=128,
+            help="Maximum number of tokens in the model's response.",
+        )
+        st.session_state["max_tokens"] = max_tokens
+
+        st.markdown("---")
         st.caption("DeepTutor v0.1.0 | Fork of HKUDS/DeepTutor")
 
 
@@ -95,17 +109,4 @@ def render_main_content() -> None:
         help="Upload a PDF document to begin your tutoring session.",
     )
 
-    if uploaded_file is not None:
-        st.session_state["uploaded_file"] = uploaded_file
-        st.success(f"✅ File uploaded: **{uploaded_file.name}**")
-
-        # Display file info
-        file_size_kb = uploaded_file.size / 1024
-        st.info(f"File size: {file_size_kb:.1f} KB")
-
-        # Placeholder for chat interface (to be implemented)
-        st.markdown("---")
-        st.subheader("Tutoring Session")
-        st.info(
-            "💡 Chat interface will appear here. "
-            "Ask questions about 
+    if up
