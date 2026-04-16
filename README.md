@@ -84,4 +84,6 @@ Key configuration options:
 
 > **Personal note:** I primarily use this with Ollama running locally (`http://localhost:11434`). Set `DEFAULT_LLM_PROVIDER=ollama` and `OLLAMA_BASE_URL=http://localhost:11434` to get started without any API keys.
 >
-> I'm currently using `llama3.2:3b` as my default local model — it's fast enough for day-to-day use and fits comfortably in 8 GB of VRAM. For heavier document analysis tasks (long PDFs, dense academic papers), I switch to `llama3.1:8b` which gives noticeably better comprehension at the cost of a bit more memory. You can override the model per-session in the UI without restarting the app.
+> I'm currently using `llama3.2:3b` as my default local model — it's fast enough for day-to-day use and fits comfortably in 8 GB of VRAM. For heavier document analysis tasks (long PDFs, dense academic papers), I switch to `llama3.1:8b` which gives noticeably better comprehension at the cost of a bit more memory.
+>
+> **Tip:** If Ollama responses feel slow, make sure no other GPU-heavy processes are running. I also set `OLLAMA_NUM_CTX=4096` in my `.env` to keep context windows manageable — the default can be quite large and slows things down on consumer hardware.
